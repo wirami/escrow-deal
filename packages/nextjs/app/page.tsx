@@ -1,72 +1,109 @@
 "use client";
 
-import Link from "next/link";
-import type { NextPage } from "next";
-import { useAccount } from "wagmi";
-import { BugAntIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { useEffect, useState } from "react";
+import { formatEther } from "viem";
+import { useAccount, useWalletClient } from "wagmi";
 import { Address } from "~~/components/scaffold-eth";
+import { useScaffoldContract } from "~~/hooks/scaffold-eth";
 
-const Home: NextPage = () => {
-  const { address: connectedAddress } = useAccount();
+type DealState = 0 | 1 | 2 | 3; // enum EscrowDeal.State
 
-  return (
-    <>
-      <div className="flex items-center flex-col grow pt-10">
-        <div className="px-5">
-          <h1 className="text-center">
-            <span className="block text-2xl mb-2">Welcome to</span>
-            <span className="block text-4xl font-bold">Scaffold-ETH 2</span>
-          </h1>
-          <div className="flex justify-center items-center space-x-2 flex-col">
-            <p className="my-2 font-medium">Connected Address:</p>
-            <Address address={connectedAddress} />
-          </div>
-
-          <p className="text-center text-lg">
-            Get started by editing{" "}
-            <code className="italic bg-base-300 text-base font-bold max-w-full break-words break-all inline-block">
-              packages/nextjs/app/page.tsx
-            </code>
-          </p>
-          <p className="text-center text-lg">
-            Edit your smart contract{" "}
-            <code className="italic bg-base-300 text-base font-bold max-w-full break-words break-all inline-block">
-              YourContract.sol
-            </code>{" "}
-            in{" "}
-            <code className="italic bg-base-300 text-base font-bold max-w-full break-words break-all inline-block">
-              packages/hardhat/contracts
-            </code>
-          </p>
-        </div>
-
-        <div className="grow bg-base-300 w-full mt-16 px-8 py-12">
-          <div className="flex justify-center items-center gap-12 flex-col md:flex-row">
-            <div className="flex flex-col bg-base-100 px-10 py-10 text-center items-center max-w-xs rounded-3xl">
-              <BugAntIcon className="h-8 w-8 fill-secondary" />
-              <p>
-                Tinker with your smart contract using the{" "}
-                <Link href="/debug" passHref className="link">
-                  Debug Contracts
-                </Link>{" "}
-                tab.
-              </p>
-            </div>
-            <div className="flex flex-col bg-base-100 px-10 py-10 text-center items-center max-w-xs rounded-3xl">
-              <MagnifyingGlassIcon className="h-8 w-8 fill-secondary" />
-              <p>
-                Explore your local transactions with the{" "}
-                <Link href="/blockexplorer" passHref className="link">
-                  Block Explorer
-                </Link>{" "}
-                tab.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </>
-  );
+const STATE_LABELS: Record<DealState, string> = {
+  0: "Awaiting payment",
+  1: "Awaiting guarantor",
+  2: "Completed",
+  3: "Cancelled",
 };
 
-export default Home;
+export default function EscrowPage() {
+  const { address } = useAccount();
+  const { data: walletClient } = useWalletClient();
+  const { data: contract, isLoading } = useScaffoldContract({ contractName: "EscrowDeal", walletClient });
+
+  const [seller, setSeller] = useState<string>();
+  const [buyer, setBuyer] = useState<string>();
+  const [guarantor, setGuarantor] = useState<string>();
+  const [price, setPrice] = useState<bigint>();
+  const [state, setState] = useState<DealState>(0);
+
+  const load = async () => {
+    if (!contract) return;
+    setSeller(await contract.read.seller());
+    setBuyer(await contract.read.buyer());
+    setGuarantor(await contract.read.guarantor());
+    setPrice(await contract.read.price());
+    setState((await contract.read.state()) as DealState);
+  };
+
+  // keep UI fresh
+  useEffect(() => {
+    if (isLoading) return;
+    load();
+    const t = setInterval(load, 2000);
+    return () => clearInterval(t);
+  }, [isLoading]); // eslint-disable-line
+
+  if (isLoading) return <p>Loading...</p>;
+  if (!contract) return <p>Contract not found.</p>;
+
+  const isSeller = address === seller;
+  const isBuyer = address === buyer;
+  const isGuarantor = address === guarantor;
+
+  const deposit = async () => {
+    const value = price ? price : 0n;
+    await contract.write.deposit({ value });
+  };
+
+  const cancelBeforeFunding = async () => {
+    await contract.write.cancelBeforeFunding();
+  };
+
+  const confirmTransfer = async () => {
+    await contract.write.confirmTransfer();
+  };
+
+  const refundBuyer = async () => {
+    await contract.write.refundBuyer();
+  };
+
+  return (
+    <div className="container mx-auto p-8 space-y-6">
+      <h1 className="text-2xl font-bold">Escrow deal</h1>
+
+      <div className="grid sm:grid-cols-2 gap-4 border p-4 rounded-xl">
+        <span className="font-semibold">Seller:</span> <Address address={seller} />
+        <span className="font-semibold">Buyer:</span> <Address address={buyer} />
+        <span className="font-semibold">Guarantor:</span> <Address address={guarantor} />
+        <span className="font-semibold">Price:</span> {price && formatEther(price)} ETH
+        <span className="font-semibold">State:</span> {STATE_LABELS[state]}
+      </div>
+
+      {/* action buttons */}
+      <div className="flex flex-wrap gap-3">
+        {state === 0 && isBuyer && (
+          <button className="btn btn-primary" onClick={deposit}>
+            Deposit {price && formatEther(price)} ETH
+          </button>
+        )}
+
+        {state === 0 && (isBuyer || isSeller) && (
+          <button className="btn btn-secondary" onClick={cancelBeforeFunding}>
+            Cancel deal
+          </button>
+        )}
+
+        {state === 1 && isGuarantor && (
+          <>
+            <button className="btn btn-success" onClick={confirmTransfer}>
+              Confirm transfer
+            </button>
+            <button className="btn btn-error" onClick={refundBuyer}>
+              Refund buyer
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

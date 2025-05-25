@@ -41,10 +41,10 @@ const config: HardhatUserConfig = {
   },
   defaultNetwork: "localhost",
   namedAccounts: {
-    deployer: {
-      // By default, it will take the first Hardhat account as the deployer
-      default: 0,
-    },
+    deployer: { default: 0 },
+    seller: { default: 1 },
+    buyer: { default: 2 },
+    guarantor: { default: 3 },
   },
   networks: {
     // View the networks that are pre-configured.

@@ -20,6 +20,7 @@ export default defineConfig([
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/ban-ts-comment": "off",
+      "@next/next/comment-to-identify-app-router-files": "off",
 
       "prettier/prettier": [
         "warn",
